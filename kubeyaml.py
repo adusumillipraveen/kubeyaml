@@ -218,6 +218,18 @@ def fluxhelmrelease_containers(manifest):
             image = '%s:%s' % (image, values['tag'])
         return image
 
+    def add_flattened_image_container(d, parent_key='', sep='.'):
+        for key, val in d.items():
+            if parent_key == '': 
+                new_key = key
+            else:
+                new_key = parent_key + sep + key   
+            if isinstance(val, collections.Mapping):
+                if 'image' in val:
+                    containers.append({'name': new_key, 'image': get_image(val)})
+                else: 
+                    add_flattened_image_container(val, new_key, sep=sep)      
+
     containers = []
     values = manifest['spec']['values']
     # Easiest one: the values section has a key called `image`, which
@@ -231,9 +243,7 @@ def fluxhelmrelease_containers(manifest):
     # Second easiest: if there's at least one dict in values that has
     # a key `image`, then all such dicts are treated as containers,
     # named for their key.
-    for k, v in mappings(values):
-        if 'image' in v:
-            containers.append({'name': k, 'image': get_image(v)})
+    add_flattened_image_container(values)
     return containers
 
 def set_fluxhelmrelease_container(manifest, container, replace):
@@ -267,6 +277,23 @@ def set_fluxhelmrelease_container(manifest, container, replace):
             pass
         return reg, im, tag
 
+    def set_flattened_image(d, parent_key = '', sep = '.'):
+        imageSet = False
+        for key, val in d.items():
+            if parent_key == '': 
+                new_key = key
+            else:
+                new_key = parent_key + sep + key   
+            if isinstance(val, collections.Mapping):
+                if new_key == container['name'] and 'image' in val:
+                    set_image(val)
+                    return True
+                else:
+                    imageSet = set_flattened_image(val, new_key, sep=sep)
+                    if imageSet:
+                        break
+        return imageSet
+
     def set_image(values):
         image = values['image']
         imageKey = 'image'
@@ -294,11 +321,8 @@ def set_fluxhelmrelease_container(manifest, container, replace):
     if container['name'] == FHR_CONTAINER and 'image' in values:
         set_image(values)
         return
-    for k, v in mappings(values):
-        if k == container['name'] and 'image' in v:
-            set_image(v)
-            return
-    raise NotFound
+    if set_flattened_image(values) != True:
+        raise NotFound()
 
 def main():
     args = parse_args()
